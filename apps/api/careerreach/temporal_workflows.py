@@ -65,3 +65,19 @@ class ApprovedCampaignWorkflow:
             retry_policy=RetryPolicy(maximum_attempts=3),
         )
         return {"campaign_id": input_data["campaign_id"], "status": status, "recipients": outcomes}
+
+
+@workflow.defn(name="careerreach.classify-inbox-batch")
+class InboxClassificationWorkflow:
+    @workflow.run
+    async def run(self, input_data: dict[str, object]) -> dict[str, object]:
+        return await workflow.execute_activity(
+            "classify_inbox_batch",
+            input_data,
+            start_to_close_timeout=timedelta(minutes=10),
+            retry_policy=RetryPolicy(
+                initial_interval=timedelta(seconds=2),
+                maximum_interval=timedelta(seconds=30),
+                maximum_attempts=3,
+            ),
+        )

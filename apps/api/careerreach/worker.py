@@ -14,9 +14,14 @@ from temporalio.worker import Worker
 
 from .config import get_settings
 from .email_integration import EmailIntegrationService
+from .inbox_intelligence import InboxIntelligenceService
 from .models import ModelRouter, OpenAICompatibleProvider
 from .orchestration import WorkflowOrchestrator
-from .temporal_workflows import ApprovedCampaignWorkflow, CareerReachWorkflow
+from .temporal_workflows import (
+    ApprovedCampaignWorkflow,
+    CareerReachWorkflow,
+    InboxClassificationWorkflow,
+)
 
 
 class AgentActivities:
@@ -75,6 +80,26 @@ class CampaignActivities:
         )
 
 
+class InboxActivities:
+    def __init__(self, inbox_service: InboxIntelligenceService) -> None:
+        self._inbox_service = inbox_service
+
+    @activity.defn(name="classify_inbox_batch")
+    async def classify_inbox_batch(self, input_data: dict[str, object]) -> dict[str, int]:
+        raw_user_id = input_data.get("user_id")
+        raw_limit = input_data.get("limit")
+        if (
+            not isinstance(raw_user_id, str)
+            or not isinstance(raw_limit, int)
+            or not 1 <= raw_limit <= 50
+        ):
+            raise ValueError("Inbox classification requires a user ID and integer limit.")
+        user_id = UUID(raw_user_id)
+        limit = raw_limit
+        classified = await self._inbox_service.classify_pending(user_id, limit)
+        return {"classified_count": classified}
+
+
 async def run_worker() -> None:
     settings = get_settings()
     if settings.database_url is None:
@@ -88,19 +113,26 @@ async def run_worker() -> None:
         provider = OpenAICompatibleProvider(settings, http_client)
         orchestrator = WorkflowOrchestrator(ModelRouter(provider))
         email_service = EmailIntegrationService(settings, http_client)
+        inbox_service = InboxIntelligenceService(settings, ModelRouter(provider))
         async with AsyncPostgresSaver.from_conn_string(settings.database_url) as checkpointer:
             await checkpointer.setup()
             activities = AgentActivities(orchestrator, checkpointer)
             campaign_activities = CampaignActivities(email_service)
+            inbox_activities = InboxActivities(inbox_service)
             worker = Worker(
                 client,
                 task_queue=settings.temporal_task_queue,
-                workflows=[CareerReachWorkflow, ApprovedCampaignWorkflow],
+                workflows=[
+                    CareerReachWorkflow,
+                    ApprovedCampaignWorkflow,
+                    InboxClassificationWorkflow,
+                ],
                 activities=[
                     activities.execute_agent_graph,
                     campaign_activities.begin_approved_campaign,
                     campaign_activities.send_campaign_recipient,
                     campaign_activities.finish_campaign,
+                    inbox_activities.classify_inbox_batch,
                 ],
                 max_concurrent_activities=8,
             )

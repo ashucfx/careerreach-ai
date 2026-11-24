@@ -33,6 +33,7 @@ from .email_integration import (
     EmailIntegrationService,
     InvalidEmailOAuthState,
 )
+from .inbox_intelligence import InboxIntelligenceService, InboxMessageNotFound
 from .job_intelligence import (
     CompanyEvidenceValidationError,
     CompanyResearchNotFound,
@@ -84,6 +85,9 @@ from .schemas import (
     EmailAuthorizationUrl,
     EmailIntegrationStatus,
     EmailSyncResult,
+    InboxFeedback,
+    InboxFeedbackRequest,
+    InboxSummary,
     JobListing,
     JobListingSummary,
     JobSubmission,
@@ -153,6 +157,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.recruiter_discovery_service,
     )
     app.state.campaign_service = CampaignService(settings)
+    app.state.inbox_intelligence_service = InboxIntelligenceService(settings, model_router)
     app.state.temporal_client = temporal_client
     yield
     await client.aclose()
@@ -702,6 +707,64 @@ async def list_synced_messages(
     service: EmailIntegrationService = web_request.app.state.email_integration_service
     try:
         return await service.list_messages(principal.user.id, limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The inbox database is unavailable.") from exc
+
+
+@app.post("/api/v1/inbox/classify", response_model=WorkflowRunStarted, status_code=202)
+async def classify_inbox(
+    web_request: Request,
+    limit: int = Query(default=20, ge=1, le=50),
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> WorkflowRunStarted:
+    settings = get_settings()
+    client: Client = web_request.app.state.temporal_client
+    run_id = f"careerreach-inbox-{principal.user.id.hex}-{uuid4().hex}"
+    try:
+        handle = await client.start_workflow(
+            "careerreach.classify-inbox-batch",
+            {"user_id": str(principal.user.id), "limit": limit},
+            id=run_id,
+            task_queue=settings.temporal_task_queue,
+        )
+        return WorkflowRunStarted(run_id=handle.id)
+    except RPCError as exc:
+        raise HTTPException(
+            status_code=503, detail="Temporal is unavailable for inbox classification."
+        ) from exc
+
+
+@app.get("/api/v1/inbox/summary", response_model=InboxSummary)
+async def inbox_summary(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> InboxSummary:
+    service: InboxIntelligenceService = web_request.app.state.inbox_intelligence_service
+    try:
+        return await service.summary(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The inbox database is unavailable.") from exc
+
+
+@app.post(
+    "/api/v1/inbox/messages/{provider_message_id}/feedback",
+    response_model=InboxFeedback,
+)
+async def provide_inbox_feedback(
+    provider_message_id: str,
+    request: InboxFeedbackRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> InboxFeedback:
+    service: InboxIntelligenceService = web_request.app.state.inbox_intelligence_service
+    try:
+        return await service.record_feedback(principal.user.id, provider_message_id, request)
+    except InboxMessageNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PostgresError as exc:
