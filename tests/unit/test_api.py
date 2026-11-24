@@ -12,6 +12,9 @@ def test_health_and_agent_catalog_do_not_require_model_credentials(monkeypatch) 
         assert len(agents) == 12
         assert client.get("/api/v1/profile").status_code == 401
         assert client.get("/api/v1/resumes").status_code == 401
+        assert client.get("/api/v1/jobs").status_code == 401
+        assert client.get("/api/v1/integrations").status_code == 401
+        assert client.get("/api/v1/research/search?query=backend%20roles").status_code == 401
         too_large = client.post(
             "/api/v1/resumes",
             files={"file": ("large.pdf", b"x" * (6 * 1024 * 1024), "application/pdf")},
