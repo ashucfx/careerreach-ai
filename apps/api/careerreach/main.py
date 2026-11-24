@@ -6,7 +6,10 @@ from uuid import UUID, uuid4
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from psycopg import AsyncConnection
 from psycopg import Error as PostgresError
+from starlette.middleware.base import RequestResponseEndpoint
+from starlette.responses import Response
 from temporalio.client import Client
 from temporalio.service import RPCError
 
@@ -173,6 +176,16 @@ app.add_middleware(
     allow_headers=["authorization", "content-type"],
 )
 app.add_middleware(ResumeUploadLimitMiddleware)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next: RequestResponseEndpoint) -> Response:
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 
 @app.post("/api/v1/auth/register", response_model=UserIdentity, status_code=201)
@@ -1065,6 +1078,24 @@ async def get_company_research(
 @app.get("/health")
 async def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/health/live")
+async def liveness() -> dict[str, str]:
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def readiness() -> dict[str, str]:
+    database_url = get_settings().database_url
+    if database_url is None:
+        raise HTTPException(status_code=503, detail="Database is not configured.")
+    try:
+        async with await AsyncConnection.connect(database_url) as connection:
+            await connection.execute("SELECT 1")
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="Database is unavailable.") from exc
+    return {"status": "ready", "database": "ok"}
 
 
 @app.get("/api/v1/agents", response_model=list[AgentDescriptor])

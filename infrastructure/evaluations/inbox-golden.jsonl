@@ -1,0 +1,7 @@
+{"id":"positive-01","expected_category":"positive_interest","email":"Thanks for reaching out. Your background looks relevant and I would be happy to discuss the role this week.","evidence_quote":"I would be happy to discuss the role this week."}
+{"id":"info-01","expected_category":"request_information","email":"Could you share your portfolio and a few examples of your recent work before we schedule a call?","evidence_quote":"Could you share your portfolio"}
+{"id":"referral-01","expected_category":"referral","email":"I am not the hiring manager, but I have forwarded your profile to Priya on our recruiting team.","evidence_quote":"I have forwarded your profile to Priya"}
+{"id":"negative-01","expected_category":"not_interested","email":"Thank you for your note. We are not moving forward with your application for this position.","evidence_quote":"We are not moving forward with your application"}
+{"id":"ooo-01","expected_category":"out_of_office","email":"I am out of the office until Monday and will respond when I return.","evidence_quote":"I am out of the office until Monday"}
+{"id":"automated-01","expected_category":"automated","email":"This is an automated confirmation that we received your application. Please do not reply to this message.","evidence_quote":"This is an automated confirmation"}
+{"id":"unclear-01","expected_category":"unclear","email":"Thanks for the note. I will keep this in mind.","evidence_quote":"I will keep this in mind."}
