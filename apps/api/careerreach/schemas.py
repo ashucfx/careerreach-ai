@@ -242,6 +242,88 @@ class CandidateProfileHistory(StrictModel):
     created_at: datetime
 
 
+class ResumeFact(StrictModel):
+    value: str = Field(min_length=1, max_length=2_000)
+    source_quote: str = Field(min_length=1, max_length=1_000)
+
+
+class ResumeSkillFact(StrictModel):
+    name: str = Field(min_length=1, max_length=120)
+    proficiency: Literal["beginner", "intermediate", "advanced", "expert"] | None = None
+    years_experience: float | None = Field(default=None, ge=0, le=80)
+    source_quote: str = Field(min_length=1, max_length=1_000)
+
+
+class ResumeExperienceFact(StrictModel):
+    employer: str = Field(min_length=1, max_length=200)
+    title: str = Field(min_length=1, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    description: str | None = Field(default=None, max_length=2_000)
+    start_date_text: str | None = Field(default=None, max_length=100)
+    end_date_text: str | None = Field(default=None, max_length=100)
+    source_quote: str = Field(min_length=1, max_length=1_000)
+
+
+class ResumeEducationFact(StrictModel):
+    institution: str = Field(min_length=1, max_length=200)
+    credential: str = Field(min_length=1, max_length=200)
+    field_of_study: str | None = Field(default=None, max_length=200)
+    start_year: int | None = Field(default=None, ge=1900, le=2100)
+    end_year: int | None = Field(default=None, ge=1900, le=2100)
+    source_quote: str = Field(min_length=1, max_length=1_000)
+
+    @model_validator(mode="after")
+    def validate_years(self) -> ResumeEducationFact:
+        if (
+            self.start_year is not None
+            and self.end_year is not None
+            and self.end_year < self.start_year
+        ):
+            raise ValueError("education end_year must not precede start_year")
+        return self
+
+
+class ResumeExtraction(StrictModel):
+    full_name: ResumeFact | None = None
+    headline: ResumeFact | None = None
+    summary: ResumeFact | None = None
+    target_titles: list[ResumeFact] = Field(
+        default_factory=lambda: list[ResumeFact](), max_length=30
+    )
+    skills: list[ResumeSkillFact] = Field(
+        default_factory=lambda: list[ResumeSkillFact](), max_length=100
+    )
+    experiences: list[ResumeExperienceFact] = Field(
+        default_factory=lambda: list[ResumeExperienceFact](), max_length=100
+    )
+    education: list[ResumeEducationFact] = Field(
+        default_factory=lambda: list[ResumeEducationFact](), max_length=50
+    )
+
+
+class ResumeDocumentSummary(StrictModel):
+    id: UUID
+    file_name: str
+    content_type: Literal[
+        "application/pdf",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ]
+    size_bytes: int = Field(gt=0)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    parser_version: str
+    uploaded_at: datetime
+    extraction_version: int | None = Field(default=None, ge=1)
+    extraction_model: str | None = None
+
+
+class ResumeDocument(ResumeDocumentSummary):
+    extracted_text: str
+    extraction: ResumeExtraction | None = None
+    extraction_latency_ms: int | None = Field(default=None, ge=0)
+    extraction_input_tokens: int | None = Field(default=None, ge=0)
+    extraction_output_tokens: int | None = Field(default=None, ge=0)
+
+
 class AccessToken(StrictModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"

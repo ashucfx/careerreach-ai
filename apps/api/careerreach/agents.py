@@ -58,7 +58,7 @@ AGENTS: dict[str, AgentDefinition] = {
         "Career Profile Intelligence Agent",
         "Extract and organize candidate career information.",
         "extraction",
-        ["read_supplied_candidate_context"],
+        ["read_supplied_candidate_context", "read_supplied_resume_document"],
         ["candidate_profile", "resume_evidence"],
         ["extraction_accuracy", "unsupported_claim_rate"],
         f"Organize supplied candidate facts into useful career findings. {_EVIDENCE_RULE}",

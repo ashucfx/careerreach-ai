@@ -1,10 +1,10 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Literal, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from psycopg import Error as PostgresError
 from temporalio.client import Client
 from temporalio.service import RPCError
@@ -27,6 +27,18 @@ from .models import (
 )
 from .orchestration import WorkflowOrchestrator, WorkflowValidationError
 from .profiles import CandidateProfileService, ProfileVersionConflict, ProfileVersionRequired
+from .resume_parser import (
+    MAX_RESUME_BYTES,
+    InvalidResumeDocument,
+    ResumeFileTooLarge,
+    UnsupportedResumeType,
+)
+from .resumes import (
+    ResumeEvidenceValidationError,
+    ResumeNotFound,
+    ResumeService,
+    ResumeTextTooLongForExtraction,
+)
 from .schemas import (
     AccessToken,
     AgentDescriptor,
@@ -35,6 +47,8 @@ from .schemas import (
     CandidateProfileWrite,
     LoginRequest,
     RegistrationRequest,
+    ResumeDocument,
+    ResumeDocumentSummary,
     UserIdentity,
     WorkflowExecution,
     WorkflowPlan,
@@ -43,8 +57,10 @@ from .schemas import (
     WorkflowRunStatus,
 )
 from .temporal_workflows import CareerReachWorkflow
+from .upload_limits import ResumeUploadLimitMiddleware
 
 _AUTHENTICATED_PRINCIPAL = Depends(get_current_principal)
+_RESUME_FILE_UPLOAD = File(...)
 
 
 @asynccontextmanager
@@ -52,21 +68,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
     client = httpx.AsyncClient()
     provider = OpenAICompatibleProvider(settings, client)
+    model_router = ModelRouter(provider)
     temporal_client = await Client.connect(
         settings.temporal_address,
         namespace=settings.temporal_namespace,
         lazy=True,
     )
     app.state.provider = provider
-    app.state.orchestrator = WorkflowOrchestrator(ModelRouter(provider))
+    app.state.orchestrator = WorkflowOrchestrator(model_router)
     app.state.auth_service = AuthService(settings)
     app.state.profile_service = CandidateProfileService(settings)
+    app.state.resume_service = ResumeService(settings, model_router)
     app.state.temporal_client = temporal_client
     yield
     await client.aclose()
 
 
 app = FastAPI(title="CareerReach AI API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(ResumeUploadLimitMiddleware)
 
 
 @app.post("/api/v1/auth/register", response_model=UserIdentity, status_code=201)
@@ -180,6 +199,116 @@ async def delete_profile(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PostgresError as exc:
         raise HTTPException(status_code=503, detail="The profile database is unavailable.") from exc
+
+
+@app.post("/api/v1/resumes", response_model=ResumeDocument, status_code=201)
+async def upload_resume(
+    web_request: Request,
+    file: UploadFile = _RESUME_FILE_UPLOAD,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> ResumeDocument:
+    try:
+        payload = await file.read(MAX_RESUME_BYTES + 1)
+    finally:
+        await file.close()
+    if len(payload) > MAX_RESUME_BYTES:
+        raise HTTPException(status_code=413, detail="Resume files must be 5 MiB or smaller.")
+    service: ResumeService = web_request.app.state.resume_service
+    try:
+        return await service.ingest(
+            principal.user.id,
+            file.filename or "",
+            file.content_type or "application/octet-stream",
+            payload,
+        )
+    except UnsupportedResumeType as exc:
+        raise HTTPException(status_code=415, detail=str(exc)) from exc
+    except InvalidResumeDocument as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ResumeFileTooLarge as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The resume database is unavailable.") from exc
+
+
+@app.get("/api/v1/resumes", response_model=list[ResumeDocumentSummary])
+async def list_resumes(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[ResumeDocumentSummary]:
+    service: ResumeService = web_request.app.state.resume_service
+    try:
+        return await service.list(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The resume database is unavailable.") from exc
+
+
+@app.get("/api/v1/resumes/{resume_id}", response_model=ResumeDocument)
+async def get_resume(
+    resume_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> ResumeDocument:
+    service: ResumeService = web_request.app.state.resume_service
+    try:
+        document = await service.get(principal.user.id, resume_id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The resume database is unavailable.") from exc
+    if document is None:
+        raise HTTPException(status_code=404, detail="Resume document was not found.")
+    return document
+
+
+@app.post("/api/v1/resumes/{resume_id}/extract", response_model=ResumeDocument)
+async def extract_resume(
+    resume_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> ResumeDocument:
+    service: ResumeService = web_request.app.state.resume_service
+    try:
+        return await service.extract(principal.user.id, resume_id)
+    except ResumeNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ResumeEvidenceValidationError as exc:
+        raise HTTPException(
+            status_code=502, detail="Resume extraction failed evidence validation."
+        ) from exc
+    except ResumeTextTooLongForExtraction as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(
+            status_code=502, detail="The resume extraction model request failed."
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The resume database is unavailable.") from exc
+
+
+@app.delete("/api/v1/resumes/{resume_id}", status_code=204)
+async def delete_resume(
+    resume_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> None:
+    service: ResumeService = web_request.app.state.resume_service
+    try:
+        await service.delete(principal.user.id, resume_id)
+    except ResumeNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The resume database is unavailable.") from exc
 
 
 @app.get("/health")
