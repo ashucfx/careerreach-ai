@@ -91,3 +91,19 @@ jobs:
       - name: Build frontend
         working-directory: apps/web
         run: npm run build
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - name: Audit locked Python dependencies
+        run: |
+          uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/careerreach-requirements.txt
+          uvx pip-audit --strict -r /tmp/careerreach-requirements.txt
+      - name: Audit locked frontend dependencies
+        working-directory: apps/web
+        run: npm audit --audit-level=high
