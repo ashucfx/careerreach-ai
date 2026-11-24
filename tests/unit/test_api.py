@@ -10,6 +10,7 @@ def test_health_and_agent_catalog_do_not_require_model_credentials(monkeypatch) 
         assert client.get("/health").json() == {"status": "ok"}
         agents = client.get("/api/v1/agents").json()
         assert len(agents) == 12
+        assert client.get("/api/v1/profile").status_code == 401
         response = client.post(
             "/api/v1/workflows/plan",
             json={"goal": "Research suitable backend engineering roles"},

@@ -46,8 +46,11 @@ jobs:
           --health-timeout 5s
           --health-retries 20
     env:
-      CAREERREACH_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/careerreach_test
-      CAREERREACH_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/careerreach_test
+      CAREERREACH_DATABASE_URL: postgresql://careerreach_runtime:test-runtime-secret@localhost:5432/careerreach_test
+      CAREERREACH_TEST_DATABASE_URL: postgresql://careerreach_runtime:test-runtime-secret@localhost:5432/careerreach_test
+      CAREERREACH_MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/careerreach_test
+      CAREERREACH_RUNTIME_DATABASE_USER: careerreach_runtime
+      CAREERREACH_RUNTIME_DATABASE_PASSWORD: test-runtime-secret
       CAREERREACH_AUTH_SIGNING_KEY: 00000000000000000000000000000000-test-only
     steps:
       - uses: actions/checkout@v4

@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     model_timeout_seconds: float = 30.0
     model_max_retries: int = 2
     database_url: str | None = None
+    migration_database_url: str | None = None
+    runtime_database_user: str | None = None
+    runtime_database_password: SecretStr | None = None
     auth_signing_key: SecretStr | None = None
     auth_token_ttl_minutes: int = Field(default=15, gt=0, le=1440)
     auth_issuer: str = "careerreach-api"

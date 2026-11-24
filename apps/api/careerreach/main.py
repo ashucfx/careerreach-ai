@@ -26,9 +26,13 @@ from .models import (
     OpenAICompatibleProvider,
 )
 from .orchestration import WorkflowOrchestrator, WorkflowValidationError
+from .profiles import CandidateProfileService, ProfileVersionConflict, ProfileVersionRequired
 from .schemas import (
     AccessToken,
     AgentDescriptor,
+    CandidateProfile,
+    CandidateProfileHistory,
+    CandidateProfileWrite,
     LoginRequest,
     RegistrationRequest,
     UserIdentity,
@@ -56,6 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.provider = provider
     app.state.orchestrator = WorkflowOrchestrator(ModelRouter(provider))
     app.state.auth_service = AuthService(settings)
+    app.state.profile_service = CandidateProfileService(settings)
     app.state.temporal_client = temporal_client
     yield
     await client.aclose()
@@ -111,6 +116,70 @@ async def logout(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PostgresError as exc:
         raise HTTPException(status_code=503, detail="The account database is unavailable.") from exc
+
+
+@app.get("/api/v1/profile", response_model=CandidateProfile)
+async def get_profile(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> CandidateProfile:
+    service: CandidateProfileService = web_request.app.state.profile_service
+    try:
+        profile = await service.get(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The profile database is unavailable.") from exc
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Candidate profile was not found.")
+    return profile
+
+
+@app.put("/api/v1/profile", response_model=CandidateProfile)
+async def save_profile(
+    profile_request: CandidateProfileWrite,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> CandidateProfile:
+    service: CandidateProfileService = web_request.app.state.profile_service
+    try:
+        return await service.save(principal.user.id, profile_request)
+    except ProfileVersionRequired as exc:
+        raise HTTPException(status_code=428, detail=str(exc)) from exc
+    except ProfileVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The profile database is unavailable.") from exc
+
+
+@app.get("/api/v1/profile/history", response_model=list[CandidateProfileHistory])
+async def profile_history(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[CandidateProfileHistory]:
+    service: CandidateProfileService = web_request.app.state.profile_service
+    try:
+        return await service.history(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The profile database is unavailable.") from exc
+
+
+@app.delete("/api/v1/profile", status_code=204)
+async def delete_profile(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> None:
+    service: CandidateProfileService = web_request.app.state.profile_service
+    try:
+        await service.delete(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The profile database is unavailable.") from exc
 
 
 @app.get("/health")
