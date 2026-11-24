@@ -49,5 +49,3 @@ venv = ".venv"
 typeCheckingMode = "strict"
 include = ["apps/api/careerreach"]
 reportMissingTypeStubs = "none"
-reportUnknownMemberType = "none"
-reportUnknownVariableType = "none"

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, TypedDict
+from collections.abc import Awaitable, Callable
+from typing import Any, Protocol, TypedDict, cast
 
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 
@@ -23,6 +25,33 @@ class AgentGraphUpdate(TypedDict, total=False):
     pending_steps: list[dict[str, Any]]
     results: dict[str, dict[str, Any]]
     execution: dict[str, Any]
+
+
+class CompiledAgentGraph(Protocol):
+    async def ainvoke(
+        self, input: AgentGraphState | None, config: RunnableConfig | None = None
+    ) -> AgentGraphState: ...
+
+
+class AgentGraphBuilder(Protocol):
+    def add_node(
+        self,
+        name: str,
+        action: Callable[[AgentGraphState], Awaitable[AgentGraphUpdate]],
+    ) -> AgentGraphBuilder: ...
+
+    def add_edge(self, start: str, end: str) -> AgentGraphBuilder: ...
+
+    def add_conditional_edges(
+        self,
+        source: str,
+        condition: Callable[[AgentGraphState], str],
+        path_map: dict[str, str],
+    ) -> AgentGraphBuilder: ...
+
+    def compile(
+        self, checkpointer: BaseCheckpointSaver[Any] | None = None
+    ) -> CompiledAgentGraph: ...
 
 
 def build_agent_graph(
@@ -81,7 +110,7 @@ def build_agent_graph(
         )
         return {"execution": execution.model_dump(mode="json")}
 
-    graph = StateGraph(AgentGraphState)
+    graph = cast(AgentGraphBuilder, StateGraph(AgentGraphState))
     graph.add_node("create_plan", create_plan)
     graph.add_node("execute_ready_batch", execute_ready_batch)
     graph.add_node("assemble_result", assemble_result)

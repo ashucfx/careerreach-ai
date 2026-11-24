@@ -20,7 +20,7 @@ class Evidence(StrictModel):
 class AgentInput(StrictModel):
     goal: str = Field(min_length=10, max_length=10_000)
     context: dict[str, Any] = Field(default_factory=dict)
-    evidence: list[Evidence] = Field(default_factory=list, max_length=100)
+    evidence: list[Evidence] = Field(default_factory=lambda: list[Evidence](), max_length=100)
 
 
 class Finding(StrictModel):
@@ -31,7 +31,7 @@ class Finding(StrictModel):
 
 class AgentOutput(StrictModel):
     summary: str = Field(min_length=1, max_length=4_000)
-    findings: list[Finding] = Field(default_factory=list, max_length=100)
+    findings: list[Finding] = Field(default_factory=lambda: list[Finding](), max_length=100)
     risks: list[str] = Field(default_factory=list, max_length=30)
     next_steps: list[str] = Field(default_factory=list, max_length=30)
 
