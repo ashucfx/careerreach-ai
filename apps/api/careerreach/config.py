@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     extraction_model: str = "gpt-4.1-mini"
     model_fallback: str | None = None
     brave_search_api_key: SecretStr | None = None
+    google_oauth_client_id: str | None = None
+    google_oauth_client_secret: SecretStr | None = None
+    google_oauth_redirect_uri: str | None = None
+    email_token_encryption_key: SecretStr | None = None
     model_timeout_seconds: float = 30.0
     model_max_retries: int = 2
     database_url: str | None = None

@@ -18,7 +18,21 @@ from .auth import (
     InvalidCredentialsError,
     get_current_principal,
 )
+from .campaigns import (
+    CampaignDraftNotFound,
+    CampaignNotFound,
+    CampaignService,
+    CampaignTransitionInvalid,
+    CampaignVersionConflict,
+)
 from .config import get_settings
+from .email_integration import (
+    EmailIntegrationNotConfigured,
+    EmailIntegrationNotConnected,
+    EmailIntegrationProviderError,
+    EmailIntegrationService,
+    InvalidEmailOAuthState,
+)
 from .job_intelligence import (
     CompanyEvidenceValidationError,
     CompanyResearchNotFound,
@@ -56,6 +70,10 @@ from .resumes import (
 from .schemas import (
     AccessToken,
     AgentDescriptor,
+    Campaign,
+    CampaignActionRequest,
+    CampaignCreateRequest,
+    CampaignSummary,
     CandidateJobMatch,
     CandidateProfile,
     CandidateProfileHistory,
@@ -63,6 +81,9 @@ from .schemas import (
     CompanyResearch,
     CompanyResearchRequest,
     CompanyResearchSummary,
+    EmailAuthorizationUrl,
+    EmailIntegrationStatus,
+    EmailSyncResult,
     JobListing,
     JobListingSummary,
     JobSubmission,
@@ -78,6 +99,7 @@ from .schemas import (
     ResearchIntegrationStatus,
     ResumeDocument,
     ResumeDocumentSummary,
+    SyncedEmailMessage,
     UserIdentity,
     WebResearchResponse,
     WorkflowExecution,
@@ -107,6 +129,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         lazy=True,
     )
     app.state.provider = provider
+    app.state.email_integration_service = EmailIntegrationService(settings, client)
     app.state.orchestrator = WorkflowOrchestrator(model_router)
     app.state.auth_service = AuthService(settings)
     app.state.profile_service = CandidateProfileService(settings)
@@ -129,6 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         app.state.job_intelligence_service,
         app.state.recruiter_discovery_service,
     )
+    app.state.campaign_service = CampaignService(settings)
     app.state.temporal_client = temporal_client
     yield
     await client.aclose()
@@ -408,6 +432,280 @@ async def create_outreach_draft(
         raise HTTPException(
             status_code=503, detail="The outreach database is unavailable."
         ) from exc
+
+
+@app.post("/api/v1/campaigns", response_model=Campaign, status_code=201)
+async def create_campaign(
+    request: CampaignCreateRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> Campaign:
+    service: CampaignService = web_request.app.state.campaign_service
+    try:
+        return await service.create(principal.user.id, request)
+    except CampaignDraftNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The campaign database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/campaigns", response_model=list[CampaignSummary])
+async def list_campaigns(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[CampaignSummary]:
+    service: CampaignService = web_request.app.state.campaign_service
+    try:
+        return await service.list(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The campaign database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/campaigns/{campaign_id}", response_model=Campaign)
+async def get_campaign(
+    campaign_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> Campaign:
+    service: CampaignService = web_request.app.state.campaign_service
+    try:
+        return await service.get(principal.user.id, campaign_id)
+    except CampaignNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The campaign database is unavailable."
+        ) from exc
+
+
+@app.post("/api/v1/campaigns/{campaign_id}/transition", response_model=Campaign)
+async def transition_campaign(
+    campaign_id: UUID,
+    request: CampaignActionRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> Campaign:
+    service: CampaignService = web_request.app.state.campaign_service
+    action = request.action
+    try:
+        if action == "submit":
+            return await service.submit_for_approval(principal.user.id, campaign_id, request)
+        if action == "approve":
+            return await service.approve(principal.user.id, campaign_id, request)
+        if action == "reject":
+            return await service.reject(principal.user.id, campaign_id, request)
+        if action == "pause":
+            return await service.pause(principal.user.id, campaign_id, request)
+        if action == "resume":
+            return await service.resume(principal.user.id, campaign_id, request)
+        if action == "retry_failed":
+            return await service.retry_failed(principal.user.id, campaign_id, request)
+        return await service.cancel(principal.user.id, campaign_id, request)
+    except CampaignNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignVersionConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except CampaignTransitionInvalid as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The campaign database is unavailable."
+        ) from exc
+
+
+@app.post(
+    "/api/v1/campaigns/{campaign_id}/execute", response_model=WorkflowRunStarted, status_code=202
+)
+async def execute_campaign(
+    campaign_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> WorkflowRunStarted:
+    settings = get_settings()
+    email_service: EmailIntegrationService = web_request.app.state.email_integration_service
+    campaign_service: CampaignService = web_request.app.state.campaign_service
+    try:
+        campaign = await campaign_service.get(principal.user.id, campaign_id)
+        if campaign.status != "approved":
+            raise HTTPException(status_code=409, detail="Approve the campaign before execution.")
+        if not email_service.configured:
+            raise HTTPException(
+                status_code=503,
+                detail="Configure Google OAuth and encryption before campaign execution.",
+            )
+        connection = await email_service.status(principal.user.id)
+        if not connection.connected:
+            raise HTTPException(status_code=409, detail="Connect Gmail before campaign execution.")
+        client: Client = web_request.app.state.temporal_client
+        run_id = f"careerreach-campaign-{principal.user.id.hex}-{campaign_id.hex}"
+        try:
+            handle = await client.start_workflow(
+                "careerreach.execute-approved-campaign",
+                {"user_id": str(principal.user.id), "campaign_id": str(campaign_id)},
+                id=run_id,
+                task_queue=settings.temporal_task_queue,
+            )
+        except RPCError as start_error:
+            handle = client.get_workflow_handle(run_id)
+            try:
+                await handle.describe()
+            except RPCError:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Temporal could not start campaign execution.",
+                ) from start_error
+        return WorkflowRunStarted(run_id=handle.id)
+    except CampaignNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EmailIntegrationNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except EmailIntegrationNotConnected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EmailIntegrationProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The campaign database is unavailable."
+        ) from exc
+    except RPCError as exc:
+        raise HTTPException(
+            status_code=503, detail="Temporal is unavailable for campaign execution."
+        ) from exc
+
+
+@app.get("/api/v1/integrations/google-mail", response_model=EmailIntegrationStatus)
+async def google_mail_status(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> EmailIntegrationStatus:
+    service: EmailIntegrationService = web_request.app.state.email_integration_service
+    try:
+        return await service.status(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The email integration database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/integrations/google-mail/authorize", response_model=EmailAuthorizationUrl)
+async def authorize_google_mail(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> EmailAuthorizationUrl:
+    service: EmailIntegrationService = web_request.app.state.email_integration_service
+    try:
+        return EmailAuthorizationUrl.model_validate(
+            {"authorization_url": await service.authorization_url(principal.user.id)}
+        )
+    except EmailIntegrationNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The email integration database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/integrations/google-mail/callback", response_model=EmailIntegrationStatus)
+async def complete_google_mail_authorization(
+    web_request: Request,
+    code: str | None = Query(default=None, min_length=1, max_length=4_000),
+    state: str | None = Query(default=None, min_length=1, max_length=500),
+    error: str | None = Query(default=None, max_length=100),
+) -> EmailIntegrationStatus:
+    if error is not None:
+        raise HTTPException(status_code=400, detail="Google Mail authorization was declined.")
+    if code is None or state is None:
+        raise HTTPException(
+            status_code=400, detail="Google Mail authorization response is incomplete."
+        )
+    service: EmailIntegrationService = web_request.app.state.email_integration_service
+    try:
+        return await service.complete_authorization(code, state)
+    except InvalidEmailOAuthState as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except EmailIntegrationNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except EmailIntegrationProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The email integration database is unavailable."
+        ) from exc
+
+
+@app.delete("/api/v1/integrations/google-mail", status_code=204)
+async def disconnect_google_mail(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> None:
+    service: EmailIntegrationService = web_request.app.state.email_integration_service
+    try:
+        await service.disconnect(principal.user.id)
+    except EmailIntegrationNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The email integration database is unavailable."
+        ) from exc
+
+
+@app.post("/api/v1/integrations/google-mail/sync", response_model=EmailSyncResult)
+async def sync_google_mail(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> EmailSyncResult:
+    service: EmailIntegrationService = web_request.app.state.email_integration_service
+    try:
+        return await service.sync_inbox(principal.user.id)
+    except EmailIntegrationNotConnected as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except EmailIntegrationNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except EmailIntegrationProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The email integration database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/inbox/messages", response_model=list[SyncedEmailMessage])
+async def list_synced_messages(
+    web_request: Request,
+    limit: int = Query(default=100, ge=1, le=500),
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[SyncedEmailMessage]:
+    service: EmailIntegrationService = web_request.app.state.email_integration_service
+    try:
+        return await service.list_messages(principal.user.id, limit)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The inbox database is unavailable.") from exc
 
 
 @app.post("/api/v1/recruiters/discover", response_model=RecruiterDiscoveryResponse, status_code=201)

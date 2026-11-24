@@ -606,6 +606,121 @@ class OutreachDraft(StrictModel):
     created_at: datetime
 
 
+class CampaignRecipientInput(StrictModel):
+    draft_id: UUID
+    recipient_email: EmailStr
+
+
+class CampaignCreateRequest(StrictModel):
+    name: str = Field(min_length=1, max_length=200)
+    recipients: list[CampaignRecipientInput] = Field(min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_unique_drafts(self) -> CampaignCreateRequest:
+        draft_ids = [recipient.draft_id for recipient in self.recipients]
+        if len(draft_ids) != len(set(draft_ids)):
+            raise ValueError("campaign draft IDs must be unique")
+        return self
+
+
+class CampaignTransitionRequest(StrictModel):
+    expected_version: int = Field(ge=1)
+
+
+class CampaignActionRequest(CampaignTransitionRequest):
+    action: Literal["submit", "approve", "reject", "pause", "resume", "cancel", "retry_failed"]
+
+
+class CampaignRecipient(StrictModel):
+    id: UUID
+    draft_id: UUID
+    draft_version: int = Field(ge=1)
+    recipient_email: EmailStr
+    status: Literal[
+        "pending_approval",
+        "approved",
+        "queued",
+        "sending",
+        "sent",
+        "failed",
+        "unknown",
+        "cancelled",
+    ]
+    email_snapshot: OutreachEmail
+    created_at: datetime
+
+
+class Campaign(StrictModel):
+    id: UUID
+    name: str
+    status: Literal[
+        "draft",
+        "awaiting_approval",
+        "approved",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+    ]
+    version: int = Field(ge=1)
+    recipients: list[CampaignRecipient]
+    created_at: datetime
+    updated_at: datetime
+    approved_at: datetime | None = None
+
+
+class CampaignSummary(StrictModel):
+    id: UUID
+    name: str
+    status: Literal[
+        "draft",
+        "awaiting_approval",
+        "approved",
+        "running",
+        "paused",
+        "completed",
+        "failed",
+        "cancelled",
+    ]
+    version: int = Field(ge=1)
+    recipient_count: int = Field(ge=0)
+    created_at: datetime
+    updated_at: datetime
+    approved_at: datetime | None = None
+
+
+class EmailIntegrationStatus(StrictModel):
+    provider: Literal["gmail"] = "gmail"
+    configured: bool
+    connected: bool
+    email: EmailStr | None = None
+    scopes: list[str] = Field(default_factory=list)
+    message: str
+
+
+class EmailAuthorizationUrl(StrictModel):
+    authorization_url: AnyHttpUrl
+
+
+class EmailSyncResult(StrictModel):
+    provider: Literal["gmail"] = "gmail"
+    synced_count: int = Field(ge=0)
+    synced_at: datetime
+
+
+class SyncedEmailMessage(StrictModel):
+    provider_message_id: str
+    provider_thread_id: str
+    sender: str | None
+    recipients: list[str]
+    subject: str | None
+    received_at: datetime | None
+    snippet: str
+    body_text: str
+    labels: list[str]
+
+
 class AccessToken(StrictModel):
     access_token: str
     token_type: Literal["bearer"] = "bearer"

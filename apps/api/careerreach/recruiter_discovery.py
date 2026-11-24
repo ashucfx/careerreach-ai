@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from typing import TypeVar
+from datetime import datetime
+from typing import TypeVar, cast
 from uuid import UUID, uuid4
 
 from psycopg import AsyncConnection
@@ -17,6 +18,7 @@ from .schemas import (
     CandidateJobMatch,
     CandidateJobMatchAnalysis,
     CandidateProfile,
+    ContactSource,
     Evidence,
     JobListing,
     MatchEvidenceQuote,
@@ -185,14 +187,19 @@ class RecruiterDiscoveryService:
                     (user_id,),
                 )
                 contacts = await cursor.fetchall()
-                output = []
+                output: list[RecruiterContact] = []
                 for item in contacts:
                     await cursor.execute(
                         "SELECT id,provider,source_id,source_url,source_title,source_snippet,source_quote,search_query,captured_at FROM contact_source WHERE recruiter_id=%s AND user_id=%s ORDER BY captured_at DESC",  # noqa: E501
                         (item["id"], user_id),
                     )
-                    sources = await cursor.fetchall()
-                    output.append(RecruiterContact(**item, sources=sources))
+                    source_rows = await cursor.fetchall()
+                    sources = [
+                        ContactSource.model_validate(dict(source_row)) for source_row in source_rows
+                    ]
+                    output.append(
+                        RecruiterContact.model_validate({**dict(item), "sources": sources})
+                    )
         return output
 
     async def match_job(self, user_id: UUID, job_id: UUID) -> CandidateJobMatch:
@@ -358,7 +365,10 @@ class RecruiterDiscoveryService:
                     "SELECT COALESCE(MAX(version),0)+1 AS version FROM candidate_job_match WHERE job_id=%s AND profile_version=%s AND user_id=%s",  # noqa: E501
                     (job.id, profile.version, user_id),
                 )
-                version = int((await cursor.fetchone())["version"])
+                version_row = await cursor.fetchone()
+                if version_row is None:
+                    raise RuntimeError("Candidate match version query returned no row.")
+                version = int(version_row["version"])
                 mid = uuid4()
                 await cursor.execute(
                     "INSERT INTO candidate_job_match(id,job_id,profile_id,user_id,profile_version,version,score,analysis,model,latency_ms,input_tokens,output_tokens) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING created_at",  # noqa: E501
@@ -377,7 +387,10 @@ class RecruiterDiscoveryService:
                         response.output_tokens,
                     ),
                 )
-                created = (await cursor.fetchone())["created_at"]
+                created_row = await cursor.fetchone()
+                if created_row is None:
+                    raise RuntimeError("Candidate match write did not return a record.")
+                created = cast(datetime, created_row["created_at"])
         return CandidateJobMatch(
             id=mid,
             job_id=job.id,
@@ -399,7 +412,7 @@ class RecruiterDiscoveryService:
         analysis: RecruiterMatchAnalysis,
         response: ModelResponse,
     ) -> list[RecruiterMatchResult]:
-        output = []
+        output: list[RecruiterMatchResult] = []
         async with (
             await AsyncConnection.connect(self._db()) as connection,
             connection.transaction(),
@@ -418,7 +431,10 @@ class RecruiterDiscoveryService:
                         "SELECT COALESCE(MAX(version),0)+1 AS version FROM candidate_contact_match WHERE recruiter_id=%s AND job_id=%s AND profile_version=%s AND user_id=%s",  # noqa: E501
                         (f.recruiter_id, job.id, profile.version, user_id),
                     )
-                    version = int((await cursor.fetchone())["version"])
+                    version_row = await cursor.fetchone()
+                    if version_row is None:
+                        raise RuntimeError("Recruiter match version query returned no row.")
+                    version = int(version_row["version"])
                     mid = uuid4()
                     await cursor.execute(
                         "INSERT INTO candidate_contact_match(id,recruiter_id,job_id,profile_id,user_id,profile_version,version,score,rationale,evidence,model,latency_ms,input_tokens,output_tokens) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING created_at",  # noqa: E501
@@ -439,7 +455,10 @@ class RecruiterDiscoveryService:
                             response.output_tokens,
                         ),
                     )
-                    created = (await cursor.fetchone())["created_at"]
+                    created_row = await cursor.fetchone()
+                    if created_row is None:
+                        raise RuntimeError("Recruiter match write did not return a record.")
+                    created = cast(datetime, created_row["created_at"])
                     output.append(
                         RecruiterMatchResult(
                             recruiter_id=f.recruiter_id,
