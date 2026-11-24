@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 from psycopg import Error as PostgresError
 from temporalio.client import Client
 from temporalio.service import RPCError
@@ -164,6 +165,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app = FastAPI(title="CareerReach AI API", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[get_settings().frontend_origin],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["authorization", "content-type"],
+)
 app.add_middleware(ResumeUploadLimitMiddleware)
 
 

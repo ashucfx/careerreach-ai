@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 48" width="240" height="48">
+        <g transform="translate(4, 4) scale(0.3333)">
+    <path d="M 24 88 L 24 44 C 24 32.954 32.954 24 44 24 L 88 24"
+          fill="none" stroke="#0F1E36" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 44 92 L 44 62 C 44 52.059 52.059 44 62 44 L 92 44"
+          fill="none" stroke="#1D5EFF" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 32 88 L 76 44"
+          fill="none" stroke="#1D5EFF" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="24" cy="92" r="8.5" fill="#0F1E36"/>
+    <circle cx="94" cy="24" r="9.5" fill="#0D9488"/>
+    </g>
+        <text x="54" y="32" font-family="Lato, Inter, Helvetica Neue, Arial, sans-serif" font-weight="700" font-size="22" letter-spacing="-0.5" fill="#0F1E36">Career<tspan font-weight="500">Reach</tspan></text>
+        <rect x="196" y="13" width="28" height="20" rx="5" fill="#1D5EFF"/>
+        <text x="210" y="27" font-family="Lato, Inter, Helvetica Neue, Arial, sans-serif" font-weight="800" font-size="11" letter-spacing="0.6" fill="#FFFFFF" text-anchor="middle">AI</text>
+        </svg>

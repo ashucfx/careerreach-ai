@@ -45,6 +45,7 @@ services:
     environment:
       CAREERREACH_DATABASE_URL: postgresql://${CAREERREACH_RUNTIME_DATABASE_USER:-careerreach_runtime}:${CAREERREACH_RUNTIME_DATABASE_PASSWORD}@postgres:5432/${POSTGRES_DB:-careerreach}
       CAREERREACH_ENVIRONMENT: ${CAREERREACH_ENVIRONMENT:-}
+      CAREERREACH_FRONTEND_ORIGIN: ${CAREERREACH_FRONTEND_ORIGIN:-http://localhost:3000}
       CAREERREACH_MODEL_BASE_URL: ${CAREERREACH_MODEL_BASE_URL:-}
       CAREERREACH_MODEL_API_KEY: ${CAREERREACH_MODEL_API_KEY:-}
       CAREERREACH_REASONING_MODEL: ${CAREERREACH_REASONING_MODEL:-}
@@ -103,6 +104,19 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_started
 
 volumes:
   postgres_data:

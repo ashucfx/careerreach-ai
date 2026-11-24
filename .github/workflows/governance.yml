@@ -69,3 +69,25 @@ jobs:
         run: uv run python -m careerreach.migrations
       - name: Test
         run: uv run pytest -q
+
+  frontend-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install locked frontend dependencies
+        working-directory: apps/web
+        run: npm ci --no-audit --no-fund
+      - name: Check TypeScript
+        working-directory: apps/web
+        run: npm run typecheck
+      - name: Lint frontend
+        working-directory: apps/web
+        run: npm run lint
+      - name: Build frontend
+        working-directory: apps/web
+        run: npm run build
