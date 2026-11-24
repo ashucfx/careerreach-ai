@@ -2,7 +2,7 @@
 
 CareerReach AI is planned as an agent-native career research and outreach platform. Its goal is to help candidates research opportunities, understand fit, and prepare evidence-based outreach with clear human approval points.
 
-> **Current status:** This repository is at its initial governance stage. Product workflows, integrations, model routing, database schemas, and deployment are not implemented yet.
+> **Current status:** The first API and agent runtime slice is implemented. Durable storage, authentication, external research and email integrations, and the web application remain planned.
 
 ## Product direction
 
@@ -26,11 +26,25 @@ flowchart LR
 
 ## Repository status
 
-The current implementation contains repository governance checks and GitHub issue forms. It does not yet contain the web application, API, agent runtime, database migrations, integrations, or deployment configuration.
+The current implementation contains a FastAPI service, typed workflow and agent schemas, a model gateway for OpenAI compatible chat completion APIs, a bounded concurrent orchestrator, twelve specialist agent specifications, a hygiene check, and GitHub Actions checks. Agent runs use only user supplied context and evidence; there are no research, contact, or email provider adapters yet. Results are not persisted between restarts.
+
+## Local development
+
+Requirements: Python 3.11 or later and [uv](https://docs.astral.sh/uv/).
+
+Install the locked dependencies and start the API:
+
+```powershell
+uv sync --locked --extra dev
+Copy-Item .env.example .env
+uv run uvicorn careerreach.main:app --app-dir apps/api --reload
+```
+
+Set `CAREERREACH_MODEL_API_KEY` in `.env` to enable model-backed planning and execution. Without it, the API still serves health and agent catalog routes, while model workflows return a configuration error. The service exposes OpenAPI documentation at `/docs` and its schema at `/openapi.json`.
 
 ## Local checks
 
-Requirements: Python 3.10 or later and Git.
+Git is also required for the repository hygiene check.
 
 Run the repository hygiene check from the repository root:
 
@@ -38,13 +52,13 @@ Run the repository hygiene check from the repository root:
 python scripts/repository_hygiene.py
 ```
 
-The check allows only the root `README.md` as Markdown, rejects tracked environment and credential files, flags selected secret patterns, and rejects generated dependency and build directories. GitHub Actions runs this check on pull requests and pushes to `main` or `master`; a GitHub secret scan also runs in CI.
+The check allows only the root `README.md` as Markdown, rejects tracked environment and credential files, flags selected secret patterns, and rejects generated dependency and build directories. GitHub Actions runs the check on pushes and pull requests; a GitHub secret scan also runs in CI.
 
-There are no application startup or test commands yet because no application code has been added.
+Run backend quality checks with `uv run ruff format --check .`, `uv run ruff check .`, `uv run mypy apps/api/careerreach`, and `uv run pytest -q`.
 
 ## Security and data handling
 
-Do not commit credentials or environment-specific files. No production data handling, account isolation, retention, or deletion behavior has been implemented yet. The planned platform will require explicit tenant isolation, provenance, retention controls, and approval before sending external communications.
+Do not commit credentials or environment-specific files. The API does not yet have user authentication, tenant isolation, durable data storage, retention, or deletion behavior. It does not send messages or call external research services. The planned platform will require tenant isolation, provenance, retention controls, and approval before external actions.
 
 ## License
 

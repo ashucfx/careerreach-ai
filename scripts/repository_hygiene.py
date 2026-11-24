@@ -5,9 +5,15 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-FORBIDDEN_ENV_NAMES = {".env", ".env.local", ".env.production", "credentials.json", "service-account.json", "private.pem"}
+FORBIDDEN_ENV_NAMES = {
+    ".env",
+    ".env.local",
+    ".env.production",
+    "credentials.json",
+    "service-account.json",
+    "private.pem",
+}
 FORBIDDEN_PARTS = {"node_modules", ".venv", "venv", "dist", "build", "__pycache__"}
 SECRET_PATTERNS = (
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
@@ -33,11 +39,14 @@ def validate(paths: list[Path]) -> list[str]:
         parts = set(relative.parts)
         if path.suffix.lower() in {".md", ".markdown"} and relative.as_posix() != "README.md":
             issues.append(f"Markdown file is not permitted: {relative.as_posix()}")
-        if path.name.lower() in FORBIDDEN_ENV_NAMES or path.name.lower().startswith(".env."):
-            if path.name != ".env.example":
-                issues.append(f"Environment or credential file is not permitted: {relative.as_posix()}")
+        if (
+            path.name.lower() in FORBIDDEN_ENV_NAMES or path.name.lower().startswith(".env.")
+        ) and path.name != ".env.example":
+            issues.append(f"Environment or credential file is not permitted: {relative.as_posix()}")
         if parts & FORBIDDEN_PARTS:
-            issues.append(f"Generated dependency or build path is not permitted: {relative.as_posix()}")
+            issues.append(
+                f"Generated dependency or build path is not permitted: {relative.as_posix()}"
+            )
         if not path.is_file():
             issues.append(f"Tracked path is missing or not a file: {relative.as_posix()}")
             continue

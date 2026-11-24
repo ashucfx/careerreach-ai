@@ -3,9 +3,6 @@ name: Repository governance
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - master
 
 permissions:
   contents: read
@@ -28,3 +25,21 @@ jobs:
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2.3.9
+
+  backend-quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install locked backend dependencies
+        run: uv sync --locked --extra dev
+      - name: Check formatting
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check .
+      - name: Type check
+        run: uv run mypy apps/api/careerreach
+      - name: Test
+        run: uv run pytest -q
