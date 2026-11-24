@@ -95,7 +95,8 @@ def prepare_database(monkeypatch: pytest.MonkeyPatch) -> Generator[None, None, N
     if database_url is None:
         pytest.skip("CAREERREACH_TEST_DATABASE_URL is required for PostgreSQL integration tests.")
     monkeypatch.setenv("CAREERREACH_DATABASE_URL", database_url)
-    monkeypatch.setenv("CAREERREACH_MIGRATION_DATABASE_URL", database_url)
+    migration_database_url = os.environ.get("CAREERREACH_MIGRATION_DATABASE_URL") or database_url
+    monkeypatch.setenv("CAREERREACH_MIGRATION_DATABASE_URL", migration_database_url)
     get_settings.cache_clear()
     asyncio.run(migrate())
     yield
