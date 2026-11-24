@@ -14,7 +14,9 @@ def test_registration_rejects_short_passwords_and_invalid_email() -> None:
 
 
 def test_authentication_requires_database_and_a_strong_signing_key() -> None:
-    missing_database = AuthService(Settings(auth_signing_key=SecretStr("x" * 64)))
+    missing_database = AuthService(
+        Settings(database_url=None, auth_signing_key=SecretStr("x" * 64))
+    )
     with pytest.raises(AuthConfigurationError, match="CAREERREACH_DATABASE_URL"):
         missing_database._credentials()
 
