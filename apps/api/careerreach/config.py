@@ -5,7 +5,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_prefix="CAREERREACH_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="CAREERREACH_", env_file=".env", env_ignore_empty=True, extra="ignore"
+    )
 
     environment: str = "development"
     model_base_url: str = "https://api.openai.com/v1"
@@ -16,6 +18,10 @@ class Settings(BaseSettings):
     model_fallback: str | None = None
     model_timeout_seconds: float = 30.0
     model_max_retries: int = 2
+    database_url: str | None = None
+    temporal_address: str = "localhost:7233"
+    temporal_namespace: str = "default"
+    temporal_task_queue: str = "careerreach-workflows"
 
 
 @lru_cache

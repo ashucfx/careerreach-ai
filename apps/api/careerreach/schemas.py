@@ -94,6 +94,17 @@ class WorkflowExecution(StrictModel):
     results: list[StepResult]
 
 
+class WorkflowRunStarted(StrictModel):
+    run_id: str
+    status: Literal["running"] = "running"
+
+
+class WorkflowRunStatus(StrictModel):
+    run_id: str
+    status: Literal["running", "completed", "failed", "cancelled", "terminated", "timed_out"]
+    result: WorkflowExecution | None = None
+
+
 class AgentDescriptor(StrictModel):
     id: str
     name: str

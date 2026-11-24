@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
+from uuid import uuid4
 
 from .agents import AGENTS
 from .models import ModelRouter
@@ -60,29 +61,27 @@ class WorkflowOrchestrator:
         return plan
 
     async def execute(self, request: WorkflowPlanRequest) -> WorkflowExecution:
-        plan = await self.plan(request)
-        results: dict[str, StepResult] = {}
-        pending = {step.id: step for step in plan.steps}
-        evidence_ids = {item.id for item in request.evidence}
+        return await self.execute_with_thread(request, uuid4().hex)
 
-        while pending:
-            ready = [step for step in pending.values() if set(step.depends_on) <= results.keys()]
-            if not ready:
-                raise WorkflowValidationError("workflow could not make progress")
-            batch = await asyncio.gather(
-                *(self._execute_step(step, request, results, evidence_ids) for step in ready)
-            )
-            for result in batch:
-                results[result.step_id] = result
-                del pending[result.step_id]
+    async def execute_with_thread(
+        self, request: WorkflowPlanRequest, thread_id: str
+    ) -> WorkflowExecution:
+        from .graph import build_agent_graph
 
-        return WorkflowExecution(
-            objective=plan.objective,
-            approval_required=plan.approval_required,
-            results=[results[step.id] for step in plan.steps],
+        graph = build_agent_graph(self)
+        final_state = await graph.ainvoke(
+            {
+                "request": request.model_dump(mode="json"),
+                "plan": {},
+                "pending_steps": [],
+                "results": {},
+                "execution": {},
+            },
+            config={"configurable": {"thread_id": thread_id}},
         )
+        return WorkflowExecution.model_validate(final_state["execution"])
 
-    async def _execute_step(
+    async def execute_step(
         self,
         step: PlanStep,
         request: AgentInput,

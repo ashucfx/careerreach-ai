@@ -40,6 +40,6 @@ jobs:
       - name: Lint
         run: uv run ruff check .
       - name: Type check
-        run: uv run mypy apps/api/careerreach
+        run: uv run pyright
       - name: Test
         run: uv run pytest -q
