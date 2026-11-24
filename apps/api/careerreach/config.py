@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     )
 
     environment: str = "development"
+    frontend_origin: str = "http://localhost:3000"
     model_base_url: str = "https://api.openai.com/v1"
     model_api_key: SecretStr | None = None
     reasoning_model: str = "gpt-4.1"
