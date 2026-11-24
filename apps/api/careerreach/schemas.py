@@ -690,6 +690,47 @@ class CampaignSummary(StrictModel):
     approved_at: datetime | None = None
 
 
+InboxCategory = Literal[
+    "positive_interest",
+    "request_information",
+    "referral",
+    "not_interested",
+    "out_of_office",
+    "automated",
+    "unclear",
+]
+
+
+class InboxClassification(StrictModel):
+    category: InboxCategory
+    confidence: float = Field(ge=0, le=1)
+    summary: str = Field(min_length=1, max_length=1_000)
+    urgency: Literal["low", "normal", "high"]
+    suggested_next_step: str = Field(min_length=1, max_length=500)
+    evidence_quotes: list[str] = Field(min_length=1, max_length=5)
+
+
+class InboxFeedbackRequest(StrictModel):
+    category: InboxCategory
+    note: str | None = Field(default=None, max_length=1_000)
+
+
+class InboxFeedback(StrictModel):
+    provider_message_id: str
+    category: InboxCategory
+    note: str | None
+    reviewed_at: datetime
+
+
+class InboxSummary(StrictModel):
+    total_messages: int = Field(ge=0)
+    classified_messages: int = Field(ge=0)
+    unclassified_messages: int = Field(ge=0)
+    feedback_count: int = Field(ge=0)
+    category_counts: dict[InboxCategory, int]
+    corrected_category_counts: dict[InboxCategory, int]
+
+
 class EmailIntegrationStatus(StrictModel):
     provider: Literal["gmail"] = "gmail"
     configured: bool
@@ -719,6 +760,8 @@ class SyncedEmailMessage(StrictModel):
     snippet: str
     body_text: str
     labels: list[str]
+    classification: InboxClassification | None = None
+    feedback_category: InboxCategory | None = None
 
 
 class AccessToken(StrictModel):

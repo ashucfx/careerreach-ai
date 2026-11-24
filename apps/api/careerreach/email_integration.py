@@ -367,7 +367,8 @@ class EmailIntegrationService:
             async with connection.cursor(row_factory=dict_row) as cursor:
                 await cursor.execute(
                     "SELECT provider_message_id,provider_thread_id,sender,recipients,subject,"
-                    "received_at,snippet,body_text,labels FROM email_message WHERE user_id=%s "
+                    "received_at,snippet,body_text,labels,classification,feedback_category "
+                    "FROM email_message WHERE user_id=%s "
                     "ORDER BY received_at DESC NULLS LAST LIMIT %s",
                     (user_id, limit),
                 )
