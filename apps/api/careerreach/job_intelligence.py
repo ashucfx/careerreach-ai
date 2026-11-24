@@ -208,6 +208,7 @@ class JobIntelligenceService:
         analysis_data = dict(row["analysis"])
         analysis_data["requirements"] = requirements
         row["analysis"] = JobAnalysis.model_validate(analysis_data)
+        row.pop("analysis_id")
         return JobListing.model_validate(row)
 
     async def delete_job(self, user_id: UUID, job_id: UUID) -> None:
