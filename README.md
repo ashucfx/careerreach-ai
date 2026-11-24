@@ -1,71 +1,138 @@
-# CareerReach AI
+<p align="center">
+  <img src="apps/web/public/brand/careerreach-primary.svg" alt="CareerReach AI" width="420" />
+</p>
 
-CareerReach AI is an agent-native career research and outreach platform. Its goal is to help candidates research opportunities, understand fit, and prepare evidence-based outreach with clear human approval points.
+<h1 align="center">CareerReach AI</h1>
 
-> **Current status:** The API, typed agent runtime, dependency-aware LangGraph execution, Temporal workflow service, PostgreSQL checkpoint storage, account authentication, and versioned candidate profiles are implemented. External research and email integrations and the web application remain planned.
+<p align="center"><strong>Career clarity, with context.</strong><br />An evidence-led workspace for researching opportunities, preparing outreach, and understanding replies.</p>
 
-## Product direction
+<p align="center">
+  <a href="https://github.com/ashucfx/careerreach-ai/actions/workflows/governance.yml"><img src="https://github.com/ashucfx/careerreach-ai/actions/workflows/governance.yml/badge.svg?branch=infra%2Frepository-governance" alt="Repository governance checks" /></a>
+  <a href="https://github.com/ashucfx/careerreach-ai/actions/workflows/codeql.yml"><img src="https://github.com/ashucfx/careerreach-ai/actions/workflows/codeql.yml/badge.svg?branch=infra%2Frepository-governance" alt="CodeQL security analysis" /></a>
+</p>
 
-The intended platform combines candidate profile intelligence, job and company research, recruiter discovery, evidence-based matching, personalized outreach, and campaign and inbox workflows. Agent plans and actions should remain inspectable, traceable to sources, and subject to user approval where they affect external services.
+> **Delivery status:** All ten implementation phases are merged to the repository’s default branch. The merged Phase 10 pull request passed backend quality, frontend quality, dependency audit, repository hygiene, secret scan, and CodeQL checks. The wider architecture below still contains capabilities intentionally outside this MVP.
 
-## Target architecture
+## 🚀 What CareerReach does
 
-The target design uses a Next.js and TypeScript web application, a Python FastAPI service, LangGraph for agent-level state transitions, and Temporal for durable business workflows. PostgreSQL with pgvector stores workflow checkpoints and is prepared for semantic search. A provider-neutral model gateway routes model tasks. A local development stack is provided with Docker Compose; its Temporal server runs in development mode and is not a production deployment.
+CareerReach AI helps a candidate organize career context, research roles and companies, find recruiter contacts, prepare sourced outreach, and review replies. Model-generated findings must use supplied source material; email delivery remains behind an explicit campaign approval step.
+
+The application currently includes:
+
+- 🔐 Account registration, login, short-lived bearer sessions, and session revocation.
+- 👤 Versioned candidate profiles and backend resume ingestion for PDF and DOCX files, with source-quoted extraction.
+- 💼 Job description analysis, candidate-to-job matching endpoints, company research, and source-backed recruiter discovery and matching.
+- ✉️ Evidence-grounded outreach drafts and campaigns with submit, approve, pause, resume, retry, and cancel controls.
+- 📥 Gmail synchronization, inbox classification, supporting quotes, and human label corrections.
+- 🤖 A typed agent directory, LangGraph execution graph, PostgreSQL checkpoints, and Temporal workflows for durable tasks.
+- 📊 Workspace counts for jobs, contacts, campaigns, and inbox classification feedback.
+- 🛡️ PostgreSQL tenant policies, dependency scanning, secret scanning, CodeQL, health checks, and frontend/backend CI.
+
+The browser workspace exposes the profile, job, company, recruiter-discovery, outreach-campaign, inbox, agent, analytics, and integration workflows. Resume management and the explicit match operations are available in the API but do not yet have dedicated frontend screens.
+
+## 🧠 Architecture
 
 ```mermaid
 flowchart LR
-    User[Candidate] --> Web[Web application]
-    Web --> API[API]
-    API --> Workflow[Durable workflow engine]
-    Workflow --> Agents[Specialist agents]
-    Agents --> Gateway[Model gateway]
-    Agents --> Tools[External research and email adapters]
-    API --> Data[(PostgreSQL and vector store)]
-    Workflow --> State[(Workflow state)]
+    Candidate[Candidate] --> Web[Next.js workspace]
+    Web --> API[FastAPI]
+    API --> Postgres[(PostgreSQL + pgvector extension)]
+    API --> Temporal[Temporal workflows]
+    Temporal --> Worker[Python worker]
+    Worker --> Graph[LangGraph agent graph]
+    Graph --> Models[OpenAI-compatible model gateway]
+    API --> Brave[Brave Search]
+    API --> Gmail[Gmail OAuth and API]
+    Graph --> Checkpoints[(PostgreSQL checkpoints)]
 ```
 
-## Repository status
+LangGraph handles agent planning and state transitions. Temporal handles durable campaign delivery and inbox-classification jobs. The API and worker share PostgreSQL; model calls use a replaceable OpenAI-compatible HTTP interface. Research and email integrations are provider-specific adapters.
 
-The current implementation contains a FastAPI service, typed workflow and agent schemas, a model gateway for OpenAI compatible chat completion APIs, a bounded concurrent orchestrator, twelve specialist agent specifications, account authentication, versioned candidate profiles, PDF and DOCX resume text ingestion, source-quoted resume extraction, tenant-isolated PostgreSQL storage, a Temporal worker, PostgreSQL-backed LangGraph checkpoints, a hygiene check, and GitHub Actions checks. Agent runs use only user supplied context and evidence; there are no research, contact, or email provider adapters yet. Durable workflow results can be queried while retained by Temporal; checkpoints are keyed by workflow run ID.
+## 🛠️ Technology stack
 
-## Local development
+| Layer | Technologies |
+| --- | --- |
+| Web | Next.js 16, React 19, TypeScript, ESLint |
+| API | Python 3.12, FastAPI, Pydantic, Ruff, Pyright |
+| Agent execution | LangGraph, typed agent schemas, bounded parallel steps |
+| Durable workflows | Temporal Python SDK and worker activities |
+| Data | PostgreSQL 17, SQL migrations, row-level security, pgvector extension |
+| Model access | Task-routed OpenAI-compatible chat completions, structured output validation, retries and fallback |
+| Integrations | Brave Search and Gmail |
+| Delivery | Docker Compose for local development; GitHub Actions CI, dependency audit, and CodeQL |
 
-Requirements for the containerized stack: Docker Compose, PostgreSQL administrator and runtime passwords, an auth signing key, and an OpenAI-compatible model API key. The API can also run directly with Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
+Brand colors follow the supplied system: Executive Midnight `#0F1E36`, Signal Cobalt `#1D5EFF`, Verified Teal `#0D9488`, and Studio Alabaster `#F8FAFC`. The product logo and interface icons are in [`apps/web/public/brand`](apps/web/public/brand).
 
-Copy the environment template, set `POSTGRES_PASSWORD`, `CAREERREACH_RUNTIME_DATABASE_PASSWORD`, `CAREERREACH_AUTH_SIGNING_KEY`, and `CAREERREACH_MODEL_API_KEY`, then start the API, PostgreSQL, and Temporal worker:
+## 💻 Run locally
+
+### Prerequisites
+
+- Git and Docker with the Compose plugin.
+- An OpenAI-compatible model API key for model-backed workflows.
+- Optional Brave Search credentials for live web research.
+- Optional Google OAuth credentials and an email-token encryption key for Gmail sync and approved delivery.
+
+Copy the environment template, set the required local values, and start the stack:
 
 ```powershell
-uv sync --locked --extra dev
 Copy-Item .env.example .env
 docker compose up --build
 ```
 
-The `.env` file contains variable names only. Generate separate 64-character hexadecimal values for `POSTGRES_PASSWORD`, `CAREERREACH_RUNTIME_DATABASE_PASSWORD`, and `CAREERREACH_AUTH_SIGNING_KEY` with `python -c "import secrets; print(secrets.token_hex(32))"`; this keeps the database passwords safe to interpolate in local Compose connection strings. Set `CAREERREACH_MODEL_API_KEY` and the model URL and model names for your provider. Compose uses a migration administrator connection to provision a non-superuser runtime role and apply versioned SQL migrations, then starts the API and worker with only the runtime database URL. For direct local development without Compose, set `CAREERREACH_MIGRATION_DATABASE_URL`, `CAREERREACH_RUNTIME_DATABASE_USER`, `CAREERREACH_RUNTIME_DATABASE_PASSWORD`, `CAREERREACH_DATABASE_URL`, `CAREERREACH_AUTH_SIGNING_KEY`, and `CAREERREACH_TEMPORAL_ADDRESS`, start PostgreSQL and Temporal separately, run `uv run python -m careerreach.migrations`, then start the API with `uv run uvicorn careerreach.main:app --app-dir apps/api --reload` and the worker with `uv run --directory apps/api python -m careerreach.worker`. The service exposes OpenAPI documentation at `/docs` and its schema at `/openapi.json`.
+At minimum, set `POSTGRES_PASSWORD`, `CAREERREACH_RUNTIME_DATABASE_PASSWORD`, and `CAREERREACH_AUTH_SIGNING_KEY` in `.env`. Set `CAREERREACH_MODEL_API_KEY` and your provider’s model names to use model-backed features. Configure `CAREERREACH_BRAVE_SEARCH_API_KEY` for research and the `CAREERREACH_GOOGLE_OAUTH_*` variables plus `CAREERREACH_EMAIL_TOKEN_ENCRYPTION_KEY` for Gmail. Keep `.env` private; only `.env.example` belongs in Git.
 
-Authentication is available through `POST /api/v1/auth/register` and `POST /api/v1/auth/token`. Send the returned bearer token to protected profile, resume, and workflow routes. `GET /api/v1/auth/me` returns the account identity; `POST /api/v1/auth/logout` revokes that session. `GET`, `PUT`, and `DELETE /api/v1/profile` read, replace, and remove the authenticated candidate's profile. Updates require `expected_version` after initial creation; previous versions are available from `GET /api/v1/profile/history`. Profile records, history, and their skills, experience, and education rows use PostgreSQL row-level security.
+Compose starts PostgreSQL, the Temporal development server, database migrations, API, worker, and web app. Open the workspace at `http://localhost:3000` and API documentation at `http://localhost:8000/docs`. The included Temporal server uses development mode and is for local use, not production.
 
-`POST /api/v1/resumes` accepts PDF and DOCX files up to 5 MiB. The service stores extracted text and source metadata, not the uploaded binary. `GET /api/v1/resumes` lists the authenticated candidate's uploads; `GET` and `DELETE /api/v1/resumes/{resume_id}` retrieve or remove one. `POST /api/v1/resumes/{resume_id}/extract` uses the configured extraction model to prepare structured candidate facts for documents with up to 60,000 extracted characters. Each fact must include an exact source quote validated against the stored resume text. Extraction is explicit, versioned, and does not overwrite the candidate profile. Scanned PDFs without extractable text are rejected; OCR and automatic profile updates are not implemented. Resume documents and their extraction history use PostgreSQL row-level security and cascade on account deletion. PostgreSQL integration tests use only `CAREERREACH_TEST_DATABASE_URL`; they do not migrate or write to the regular application database.
+## 🧪 Checks
 
-`POST /api/v1/workflows/plan` creates a structured plan, `POST /api/v1/workflows/execute` runs it synchronously, and `POST /api/v1/workflow-runs` starts a durable Temporal run. Query durable runs with `GET /api/v1/workflow-runs/{run_id}`. These workflow routes require authentication. Temporal retries activity failures; LangGraph checkpoints progress in PostgreSQL. The current durable path requires a configured model API key and a running worker.
-
-## Local checks
-
-Git is also required for the repository hygiene check.
-
-Run the repository hygiene check from the repository root:
+Run backend checks from the repository root:
 
 ```powershell
-python scripts/repository_hygiene.py
+uv sync --locked --extra dev
+uv run ruff format --check .
+uv run ruff check .
+uv run pyright
+uv run pytest -q
 ```
 
-The check allows only the root `README.md` as Markdown, rejects tracked environment and credential files, flags selected secret patterns, and rejects generated dependency and build directories. GitHub Actions runs the check on pushes and pull requests; a GitHub secret scan also runs in CI.
+Run frontend checks from `apps/web`:
 
-Run backend quality checks with `uv run ruff format --check .`, `uv run ruff check .`, `uv run pyright`, and `uv run pytest -q`.
+```powershell
+npm ci
+npm run typecheck
+npm run lint
+npm run build
+```
 
-## Security and data handling
+The inbox evaluation utility scores supplied JSONL predictions against a synthetic, non-user dataset:
 
-Do not commit credentials or environment-specific files. User identity and revocable sessions are implemented, and profile, resume, and workflow routes require a valid account token. Candidate profile, resume, and extraction tables enforce tenant row policies when accessed with the non-superuser runtime role. Uploaded resume binaries are discarded after parsing; extracted text and source-quoted model output remain until the user deletes the resume or account. Profile history is retained until its profile is deleted. No automatic retention schedule is configured. Email verification, account recovery, and login rate limiting are not implemented yet. Durable checkpoints and Temporal history can contain user-provided career context, so use synthetic data in development and apply appropriate access and retention controls before production. The system does not send messages or call external research services. The planned platform will require broader provenance, retention controls, and approval before external actions.
+```powershell
+python scripts/evaluate_inbox.py path\to\predictions.jsonl --min-accuracy 0.8 --min-grounding 0.95
+```
 
-## License
+GitHub Actions runs backend migration and test checks, frontend checks, dependency audits, repository hygiene, secret scanning, and CodeQL. The repository hygiene rule permits only this root `README.md` as a Markdown file.
 
-No license has been selected or added. Until one is chosen, reuse and redistribution permissions are not granted by this repository.
+## 🔐 Data and security
+
+Account-owned profile, resume, research, campaign, and inbox records use tenant-scoped database access. Resume binaries are parsed and discarded; extracted text and evidence remain in the account until deleted. Gmail refresh tokens are encrypted in PostgreSQL, and campaigns require approval before execution. The browser holds its access token in memory, so refreshing the page ends that browser session.
+
+Use synthetic candidate and email data in development. Before production, configure HTTPS and managed secrets, define retention and deletion procedures for workflow history, and deploy a production Temporal service. The repository does not include a production deployment pipeline or a configured hosting environment.
+
+## 🧭 Remaining roadmap
+
+These are broader architecture goals, not unfinished Phase 10 checks:
+
+- Semantic retrieval with embeddings and reranking; pgvector is installed but the current matching flows do not yet use vector search. Redis is not part of the running stack.
+- Dedicated contact enrichment and email verification, plus Outlook and calendar integrations. Current external adapters are Brave Search and Gmail.
+- Frontend workflows for resume upload/extraction and explicit candidate-job and recruiter matching.
+- Full CRM/opportunity tracking, follow-up scheduling, career outcome analysis, and persistent user preferences.
+- Dedicated evaluation datasets and CI quality gates for matching, contact relevance, research factuality, and outreach quality. The current evaluation harness covers inbox classification output only.
+- OpenTelemetry/Langfuse traces, cost reporting, and production operational dashboards.
+- Production staging/deployment, container vulnerability scanning, license policy checks, backups, and rollback procedures.
+- Account email verification and recovery, login rate limiting, and configurable data-retention policies.
+
+Twelve specialist roles are described in the agent directory. Several have dedicated product flows today; contact verification, career recommendations, and quality-policy review still need end-to-end implementations and evaluation before they should be presented as operational features.
+
+## 📄 License
+
+No license has been selected. Until one is added, this repository does not grant reuse or redistribution rights.
