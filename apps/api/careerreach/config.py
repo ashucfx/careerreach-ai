@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     communication_model: str = "gpt-4.1-mini"
     extraction_model: str = "gpt-4.1-mini"
     model_fallback: str | None = None
+    brave_search_api_key: SecretStr | None = None
     model_timeout_seconds: float = 30.0
     model_max_retries: int = 2
     database_url: str | None = None

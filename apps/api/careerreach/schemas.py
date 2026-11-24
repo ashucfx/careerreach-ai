@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, model_validator
+from pydantic import AnyHttpUrl, BaseModel, ConfigDict, EmailStr, Field, SecretStr, model_validator
 
 
 class StrictModel(BaseModel):
@@ -322,6 +322,288 @@ class ResumeDocument(ResumeDocumentSummary):
     extraction_latency_ms: int | None = Field(default=None, ge=0)
     extraction_input_tokens: int | None = Field(default=None, ge=0)
     extraction_output_tokens: int | None = Field(default=None, ge=0)
+
+
+class JobRequirement(StrictModel):
+    requirement: str = Field(min_length=1, max_length=1_000)
+    category: Literal[
+        "skill",
+        "experience",
+        "education",
+        "responsibility",
+        "location",
+        "work_authorization",
+        "compensation",
+        "other",
+    ]
+    required: bool
+    source_quote: str = Field(min_length=1, max_length=1_000)
+
+
+class JobAnalysis(StrictModel):
+    role_summary: str = Field(min_length=1, max_length=4_000)
+    summary_quotes: list[str] = Field(min_length=1, max_length=10)
+    seniority: str | None = Field(default=None, max_length=120)
+    employment_type: str | None = Field(default=None, max_length=120)
+    requirements: list[JobRequirement] = Field(
+        default_factory=lambda: list[JobRequirement](), max_length=100
+    )
+
+
+class JobSubmission(StrictModel):
+    title: str = Field(min_length=1, max_length=200)
+    company_name: str = Field(min_length=1, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    source_url: AnyHttpUrl | None = Field(default=None, max_length=2_000)
+    description: str = Field(min_length=100, max_length=50_000)
+
+
+class JobListingSummary(StrictModel):
+    id: UUID
+    title: str
+    company_name: str
+    location: str | None
+    source_url: str | None
+    source_captured_at: datetime
+    version: int = Field(ge=1)
+    created_at: datetime
+
+
+class JobListing(JobListingSummary):
+    description: str
+    analysis: JobAnalysis
+    analysis_model: str
+    analysis_latency_ms: int = Field(ge=0)
+    analysis_input_tokens: int | None = Field(default=None, ge=0)
+    analysis_output_tokens: int | None = Field(default=None, ge=0)
+
+
+class WebResearchResult(StrictModel):
+    id: str = Field(min_length=1, max_length=128)
+    title: str = Field(min_length=1, max_length=500)
+    url: str = Field(min_length=1, max_length=2_000)
+    snippet: str = Field(min_length=1, max_length=4_000)
+    captured_at: datetime
+
+
+class WebResearchResponse(StrictModel):
+    provider: Literal["brave_search"] = "brave_search"
+    query: str = Field(min_length=1, max_length=500)
+    results: list[WebResearchResult] = Field(max_length=20)
+    captured_at: datetime
+
+
+class ResearchIntegrationStatus(StrictModel):
+    provider: Literal["brave_search"] = "brave_search"
+    configured: bool
+    connected: bool | None = None
+    checked_at: datetime | None = None
+    result_count: int | None = Field(default=None, ge=0)
+    message: str
+
+
+class CompanyResearchRequest(StrictModel):
+    company_name: str = Field(min_length=1, max_length=200)
+    query: str | None = Field(default=None, min_length=3, max_length=500)
+    result_count: int = Field(default=8, ge=1, le=10)
+
+
+class CompanyEvidenceQuote(StrictModel):
+    evidence_id: str = Field(min_length=1, max_length=128)
+    quote: str = Field(min_length=1, max_length=1_000)
+
+
+class CompanyResearchFinding(StrictModel):
+    category: Literal["overview", "product", "market", "hiring", "culture", "news", "other"]
+    claim: str = Field(min_length=1, max_length=2_000)
+    source_quotes: list[CompanyEvidenceQuote] = Field(min_length=1, max_length=10)
+
+
+class CompanyResearchAnalysis(StrictModel):
+    summary: str = Field(min_length=1, max_length=4_000)
+    summary_quotes: list[CompanyEvidenceQuote] = Field(min_length=1, max_length=10)
+    findings: list[CompanyResearchFinding] = Field(min_length=1, max_length=40)
+
+
+class CompanyResearch(StrictModel):
+    id: UUID
+    company_id: UUID
+    company_name: str
+    version: int = Field(ge=1)
+    query: str
+    analysis: CompanyResearchAnalysis
+    sources: list[WebResearchResult]
+    model: str
+    latency_ms: int = Field(ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    created_at: datetime
+
+
+class CompanyResearchSummary(StrictModel):
+    company_id: UUID
+    company_name: str
+    latest_version: int = Field(ge=1)
+    updated_at: datetime
+
+
+class RecruiterDiscoveryRequest(StrictModel):
+    company_name: str = Field(min_length=1, max_length=200)
+    target_role: str = Field(min_length=1, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    result_count: int = Field(default=8, ge=1, le=10)
+
+
+class RecruiterCandidateFinding(StrictModel):
+    full_name: str = Field(min_length=2, max_length=200)
+    title: str = Field(min_length=2, max_length=200)
+    company_name: str = Field(min_length=1, max_length=200)
+    location: str | None = Field(default=None, max_length=200)
+    profile_url: AnyHttpUrl | None = None
+    evidence_id: str = Field(min_length=1, max_length=128)
+    source_quote: str = Field(min_length=1, max_length=1_000)
+    confidence: float = Field(ge=0, le=1)
+
+
+class RecruiterDiscoveryAnalysis(StrictModel):
+    candidates: list[RecruiterCandidateFinding] = Field(max_length=30)
+
+
+class ContactSource(StrictModel):
+    id: UUID
+    provider: str
+    source_id: str
+    source_url: str
+    source_title: str
+    source_snippet: str
+    source_quote: str
+    search_query: str
+    captured_at: datetime
+
+
+class RecruiterContact(StrictModel):
+    id: UUID
+    full_name: str
+    title: str
+    company_name: str
+    location: str | None
+    profile_url: str | None
+    sources: list[ContactSource]
+    created_at: datetime
+    updated_at: datetime
+
+
+class RecruiterDiscoveryResponse(StrictModel):
+    query: str
+    captured_at: datetime
+    recruiters: list[RecruiterContact]
+
+
+class MatchEvidenceQuote(StrictModel):
+    evidence_id: str = Field(min_length=1, max_length=128)
+    quote: str = Field(min_length=1, max_length=1_000)
+
+
+class MatchStatement(StrictModel):
+    statement: str = Field(min_length=1, max_length=1_000)
+    evidence: list[MatchEvidenceQuote] = Field(min_length=1, max_length=10)
+
+
+class CandidateJobMatchAnalysis(StrictModel):
+    score: int = Field(ge=0, le=100)
+    summary: str = Field(min_length=1, max_length=2_000)
+    strengths: list[MatchStatement] = Field(max_length=30)
+    gaps: list[MatchStatement] = Field(max_length=30)
+
+
+class CandidateJobMatch(StrictModel):
+    id: UUID
+    job_id: UUID
+    profile_version: int = Field(ge=1)
+    version: int = Field(ge=1)
+    analysis: CandidateJobMatchAnalysis
+    model: str
+    latency_ms: int = Field(ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    created_at: datetime
+
+
+class RecruiterMatchRequest(StrictModel):
+    job_id: UUID
+    recruiter_ids: list[UUID] = Field(min_length=1, max_length=30)
+
+    @model_validator(mode="after")
+    def validate_unique_recruiters(self) -> RecruiterMatchRequest:
+        if len(self.recruiter_ids) != len(set(self.recruiter_ids)):
+            raise ValueError("recruiter_ids must be unique")
+        return self
+
+
+class RecruiterMatchFinding(StrictModel):
+    recruiter_id: UUID
+    score: int = Field(ge=0, le=100)
+    rationale: str = Field(min_length=1, max_length=2_000)
+    evidence: list[MatchEvidenceQuote] = Field(min_length=1, max_length=10)
+
+
+class RecruiterMatchAnalysis(StrictModel):
+    findings: list[RecruiterMatchFinding] = Field(max_length=30)
+
+
+class RecruiterMatchResult(StrictModel):
+    recruiter_id: UUID
+    job_id: UUID
+    profile_version: int = Field(ge=1)
+    version: int = Field(ge=1)
+    score: int = Field(ge=0, le=100)
+    rationale: str
+    evidence: list[MatchEvidenceQuote]
+    model: str
+    latency_ms: int = Field(ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    created_at: datetime
+
+
+class OutreachDraftRequest(StrictModel):
+    recruiter_id: UUID
+    job_id: UUID
+    tone: Literal["warm", "direct", "formal"] = "warm"
+    context: str | None = Field(default=None, max_length=2_000)
+
+
+class OutreachPoint(StrictModel):
+    point: str = Field(min_length=1, max_length=500)
+    evidence: list[MatchEvidenceQuote] = Field(min_length=1, max_length=5)
+
+
+class OutreachStrategy(StrictModel):
+    objective: str = Field(min_length=1, max_length=500)
+    approach: str = Field(min_length=1, max_length=1_000)
+    talking_points: list[OutreachPoint] = Field(min_length=1, max_length=8)
+    call_to_action: str = Field(min_length=1, max_length=300)
+
+
+class OutreachEmail(StrictModel):
+    subject: str = Field(min_length=1, max_length=200)
+    body: str = Field(min_length=1, max_length=5_000)
+    factual_claims: list[OutreachPoint] = Field(max_length=15)
+
+
+class OutreachDraft(StrictModel):
+    id: UUID
+    recruiter_id: UUID
+    job_id: UUID
+    version: int = Field(ge=1)
+    strategy: OutreachStrategy
+    email: OutreachEmail
+    tone: Literal["warm", "direct", "formal"]
+    model: str
+    latency_ms: int = Field(ge=0)
+    input_tokens: int | None = Field(default=None, ge=0)
+    output_tokens: int | None = Field(default=None, ge=0)
+    created_at: datetime
 
 
 class AccessToken(StrictModel):

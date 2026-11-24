@@ -4,7 +4,7 @@ from typing import Literal, cast
 from uuid import UUID, uuid4
 
 import httpx
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from psycopg import Error as PostgresError
 from temporalio.client import Client
 from temporalio.service import RPCError
@@ -19,6 +19,14 @@ from .auth import (
     get_current_principal,
 )
 from .config import get_settings
+from .job_intelligence import (
+    CompanyEvidenceValidationError,
+    CompanyResearchNotFound,
+    JobEvidenceValidationError,
+    JobIntelligenceService,
+    JobNotFound,
+    NoResearchSources,
+)
 from .models import (
     ModelConfigurationError,
     ModelProviderError,
@@ -26,7 +34,13 @@ from .models import (
     OpenAICompatibleProvider,
 )
 from .orchestration import WorkflowOrchestrator, WorkflowValidationError
+from .outreach import OutreachContextNotFound, OutreachDraftService, OutreachEvidenceError
 from .profiles import CandidateProfileService, ProfileVersionConflict, ProfileVersionRequired
+from .recruiter_discovery import (
+    DiscoveryEvidenceError,
+    ProfileRequired,
+    RecruiterDiscoveryService,
+)
 from .resume_parser import (
     MAX_RESUME_BYTES,
     InvalidResumeDocument,
@@ -42,14 +56,30 @@ from .resumes import (
 from .schemas import (
     AccessToken,
     AgentDescriptor,
+    CandidateJobMatch,
     CandidateProfile,
     CandidateProfileHistory,
     CandidateProfileWrite,
+    CompanyResearch,
+    CompanyResearchRequest,
+    CompanyResearchSummary,
+    JobListing,
+    JobListingSummary,
+    JobSubmission,
     LoginRequest,
+    OutreachDraft,
+    OutreachDraftRequest,
+    RecruiterContact,
+    RecruiterDiscoveryRequest,
+    RecruiterDiscoveryResponse,
+    RecruiterMatchRequest,
+    RecruiterMatchResult,
     RegistrationRequest,
+    ResearchIntegrationStatus,
     ResumeDocument,
     ResumeDocumentSummary,
     UserIdentity,
+    WebResearchResponse,
     WorkflowExecution,
     WorkflowPlan,
     WorkflowPlanRequest,
@@ -58,6 +88,7 @@ from .schemas import (
 )
 from .temporal_workflows import CareerReachWorkflow
 from .upload_limits import ResumeUploadLimitMiddleware
+from .web_research import BraveSearchProvider, SearchNotConfigured, SearchProviderError
 
 _AUTHENTICATED_PRINCIPAL = Depends(get_current_principal)
 _RESUME_FILE_UPLOAD = File(...)
@@ -69,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     client = httpx.AsyncClient()
     provider = OpenAICompatibleProvider(settings, client)
     model_router = ModelRouter(provider)
+    search_provider = BraveSearchProvider(settings, client)
     temporal_client = await Client.connect(
         settings.temporal_address,
         namespace=settings.temporal_namespace,
@@ -79,6 +111,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.auth_service = AuthService(settings)
     app.state.profile_service = CandidateProfileService(settings)
     app.state.resume_service = ResumeService(settings, model_router)
+    app.state.search_provider = search_provider
+    app.state.job_intelligence_service = JobIntelligenceService(
+        settings, model_router, search_provider
+    )
+    app.state.recruiter_discovery_service = RecruiterDiscoveryService(
+        settings,
+        model_router,
+        search_provider,
+        app.state.profile_service,
+        app.state.job_intelligence_service,
+    )
+    app.state.outreach_draft_service = OutreachDraftService(
+        settings,
+        model_router,
+        app.state.profile_service,
+        app.state.job_intelligence_service,
+        app.state.recruiter_discovery_service,
+    )
     app.state.temporal_client = temporal_client
     yield
     await client.aclose()
@@ -309,6 +359,338 @@ async def delete_resume(
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except PostgresError as exc:
         raise HTTPException(status_code=503, detail="The resume database is unavailable.") from exc
+
+
+@app.get("/api/v1/integrations", response_model=list[ResearchIntegrationStatus])
+async def integrations(
+    web_request: Request,
+    _principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[ResearchIntegrationStatus]:
+    provider: BraveSearchProvider = web_request.app.state.search_provider
+    configured = provider.configured
+    return [
+        ResearchIntegrationStatus(
+            configured=configured,
+            connected=False if not configured else None,
+            message=(
+                "Set CAREERREACH_BRAVE_SEARCH_API_KEY to enable web research."
+                if not configured
+                else "Configured; run the connection test to verify access."
+            ),
+        )
+    ]
+
+
+@app.post("/api/v1/outreach/drafts", response_model=OutreachDraft, status_code=201)
+async def create_outreach_draft(
+    request: OutreachDraftRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> OutreachDraft:
+    service: OutreachDraftService = web_request.app.state.outreach_draft_service
+    try:
+        return await service.create(principal.user.id, request)
+    except (OutreachContextNotFound, JobNotFound) as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProfileRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except OutreachEvidenceError as exc:
+        raise HTTPException(
+            status_code=502, detail="Outreach draft failed evidence validation."
+        ) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=502, detail="The outreach model request failed.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The outreach database is unavailable."
+        ) from exc
+
+
+@app.post("/api/v1/recruiters/discover", response_model=RecruiterDiscoveryResponse, status_code=201)
+async def discover_recruiters(
+    request: RecruiterDiscoveryRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> RecruiterDiscoveryResponse:
+    service: RecruiterDiscoveryService = web_request.app.state.recruiter_discovery_service
+    try:
+        return await service.discover(principal.user.id, request)
+    except SearchNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SearchProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except DiscoveryEvidenceError as exc:
+        raise HTTPException(
+            status_code=502, detail="Recruiter discovery failed evidence validation."
+        ) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(
+            status_code=502, detail="The recruiter discovery model request failed."
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The recruiter database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/recruiters", response_model=list[RecruiterContact])
+async def list_recruiters(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[RecruiterContact]:
+    service: RecruiterDiscoveryService = web_request.app.state.recruiter_discovery_service
+    try:
+        return await service.list_contacts(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The recruiter database is unavailable."
+        ) from exc
+
+
+@app.post("/api/v1/jobs/{job_id}/match", response_model=CandidateJobMatch, status_code=201)
+async def match_job(
+    job_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> CandidateJobMatch:
+    service: RecruiterDiscoveryService = web_request.app.state.recruiter_discovery_service
+    try:
+        return await service.match_job(principal.user.id, job_id)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProfileRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DiscoveryEvidenceError as exc:
+        raise HTTPException(
+            status_code=502, detail="Candidate matching failed evidence validation."
+        ) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=502, detail="The matching model request failed.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The matching database is unavailable."
+        ) from exc
+
+
+@app.post("/api/v1/recruiters/match", response_model=list[RecruiterMatchResult], status_code=201)
+async def match_recruiters(
+    request: RecruiterMatchRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[RecruiterMatchResult]:
+    service: RecruiterDiscoveryService = web_request.app.state.recruiter_discovery_service
+    try:
+        return await service.match_recruiters(principal.user.id, request)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ProfileRequired as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DiscoveryEvidenceError as exc:
+        raise HTTPException(
+            status_code=502, detail="Recruiter matching failed evidence validation."
+        ) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(status_code=502, detail="The matching model request failed.") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The matching database is unavailable."
+        ) from exc
+
+
+@app.post("/api/v1/integrations/brave-search/test", response_model=ResearchIntegrationStatus)
+async def test_search_connection(
+    web_request: Request,
+    _principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> ResearchIntegrationStatus:
+    provider: BraveSearchProvider = web_request.app.state.search_provider
+    try:
+        result = await provider.test_connection()
+    except SearchNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SearchProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return ResearchIntegrationStatus(
+        configured=True,
+        connected=True,
+        checked_at=result.captured_at,
+        result_count=len(result.results),
+        message="Brave Search connection succeeded.",
+    )
+
+
+@app.get("/api/v1/research/search", response_model=WebResearchResponse)
+async def web_search(
+    web_request: Request,
+    query: str = Query(min_length=3, max_length=500),
+    count: int = Query(default=8, ge=1, le=10),
+    _principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> WebResearchResponse:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.search(query, count)
+    except SearchNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SearchProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/v1/jobs", response_model=JobListing, status_code=201)
+async def analyze_job(
+    submission: JobSubmission,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> JobListing:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.analyze_job(principal.user.id, submission)
+    except JobEvidenceValidationError as exc:
+        raise HTTPException(
+            status_code=502, detail="Job analysis failed evidence validation."
+        ) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(
+            status_code=502, detail="The job analysis model request failed."
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The job database is unavailable.") from exc
+
+
+@app.get("/api/v1/jobs", response_model=list[JobListingSummary])
+async def list_jobs(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[JobListingSummary]:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.list_jobs(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The job database is unavailable.") from exc
+
+
+@app.get("/api/v1/jobs/{job_id}", response_model=JobListing)
+async def get_job(
+    job_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> JobListing:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.get_job(principal.user.id, job_id)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The job database is unavailable.") from exc
+
+
+@app.delete("/api/v1/jobs/{job_id}", status_code=204)
+async def delete_job(
+    job_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> None:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        await service.delete_job(principal.user.id, job_id)
+    except JobNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(status_code=503, detail="The job database is unavailable.") from exc
+
+
+@app.post("/api/v1/companies/research", response_model=CompanyResearch, status_code=201)
+async def research_company(
+    request: CompanyResearchRequest,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> CompanyResearch:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.research_company(principal.user.id, request)
+    except SearchNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SearchProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except NoResearchSources as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except CompanyEvidenceValidationError as exc:
+        raise HTTPException(
+            status_code=502, detail="Company research failed evidence validation."
+        ) from exc
+    except ModelConfigurationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ModelProviderError as exc:
+        raise HTTPException(
+            status_code=502, detail="The company research model request failed."
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The company research database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/companies/research", response_model=list[CompanyResearchSummary])
+async def list_company_research(
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> list[CompanyResearchSummary]:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.list_company_research(principal.user.id)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The company research database is unavailable."
+        ) from exc
+
+
+@app.get("/api/v1/companies/{company_id}/research", response_model=CompanyResearch)
+async def get_company_research(
+    company_id: UUID,
+    web_request: Request,
+    principal: AuthenticatedPrincipal = _AUTHENTICATED_PRINCIPAL,
+) -> CompanyResearch:
+    service: JobIntelligenceService = web_request.app.state.job_intelligence_service
+    try:
+        return await service.get_company_research(principal.user.id, company_id)
+    except CompanyResearchNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except PostgresError as exc:
+        raise HTTPException(
+            status_code=503, detail="The company research database is unavailable."
+        ) from exc
 
 
 @app.get("/health")

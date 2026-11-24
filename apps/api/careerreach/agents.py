@@ -25,13 +25,14 @@ def _agent(
     context: list[str],
     metrics: list[str],
     instructions: str,
+    tools: list[str] | None = None,
 ) -> AgentDefinition:
     return AgentDefinition(
         descriptor=AgentDescriptor(
             id=agent_id,
             name=name,
             purpose=purpose,
-            tools=[],
+            tools=tools or [],
             permissions=permissions,
             context_requirements=context,
             model_task=task,
@@ -72,6 +73,7 @@ AGENTS: dict[str, AgentDefinition] = {
         ["job_description", "job_metadata"],
         ["requirement_extraction_accuracy", "unsupported_claim_rate"],
         _grounded("Identify explicit requirements and distinguish them from inferred preferences."),
+        tools=["brave_web_search"],
     ),
     "company-research": _agent(
         "company-research",
@@ -82,6 +84,7 @@ AGENTS: dict[str, AgentDefinition] = {
         ["company_evidence"],
         ["source_quality", "factuality"],
         f"Summarize only the company evidence supplied in context. {_EVIDENCE_RULE}",
+        tools=["brave_web_search"],
     ),
     "recruiter-discovery": _agent(
         "recruiter-discovery",
