@@ -14,6 +14,6 @@ def test_health_and_agent_catalog_do_not_require_model_credentials(monkeypatch) 
             "/api/v1/workflows/plan",
             json={"goal": "Research suitable backend engineering roles"},
         )
-        assert response.status_code == 503
-        assert "CAREERREACH_MODEL_API_KEY" in response.json()["detail"]
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Authentication is required."
     get_settings.cache_clear()

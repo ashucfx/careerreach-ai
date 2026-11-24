@@ -12,6 +12,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-dev --no-install-project
 
 COPY apps/api/careerreach apps/api/careerreach
+COPY infrastructure/database/migrations infrastructure/database/migrations
 RUN uv sync --locked --no-dev
 
 USER 10001:10001

@@ -28,6 +28,17 @@ services:
       timeout: 5s
       retries: 30
 
+  migrate:
+    build: .
+    command: ["python", "-m", "careerreach.migrations"]
+    env_file:
+      - .env
+    environment:
+      CAREERREACH_DATABASE_URL: postgresql://${POSTGRES_USER:-careerreach}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-careerreach}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     env_file:
@@ -42,6 +53,8 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build: .
@@ -56,6 +69,8 @@ services:
         condition: service_healthy
       temporal:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

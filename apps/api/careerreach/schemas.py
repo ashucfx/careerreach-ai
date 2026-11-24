@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, SecretStr, model_validator
 
 
 class StrictModel(BaseModel):
@@ -103,6 +104,28 @@ class WorkflowRunStatus(StrictModel):
     run_id: str
     status: Literal["running", "completed", "failed", "cancelled", "terminated", "timed_out"]
     result: WorkflowExecution | None = None
+
+
+class RegistrationRequest(StrictModel):
+    email: EmailStr
+    password: SecretStr = Field(min_length=15, max_length=128)
+
+
+class LoginRequest(StrictModel):
+    email: EmailStr
+    password: SecretStr = Field(min_length=1, max_length=128)
+
+
+class UserIdentity(StrictModel):
+    id: UUID
+    email: EmailStr
+    created_at: datetime
+
+
+class AccessToken(StrictModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int = Field(gt=0)
 
 
 class AgentDescriptor(StrictModel):
