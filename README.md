@@ -159,4 +159,6 @@ The broader product plan extends beyond this MVP:
 
 ## License
 
-No license has been selected. Until one is added, this repository does not grant reuse or redistribution rights.
+CareerReach AI is proprietary software. All rights are reserved by the copyright holder; no permission is granted to copy, modify, redistribute, sublicense, or create derivative works without prior written permission, except where applicable law requires otherwise. See [`LICENSE`](LICENSE) for the terms and permission contact.
+
+This license does not technically prevent cloning or forking while the GitHub repository is public. GitHub's Terms of Service allow users to view and fork public repositories. To restrict new access and forks, change the repository visibility to **Private** in GitHub settings; that will not remove copies or forks already made. See [GitHub's licensing guidance](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository).
