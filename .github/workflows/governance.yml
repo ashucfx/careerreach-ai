@@ -102,7 +102,7 @@ jobs:
           node-version: "24"
       - name: Audit locked Python dependencies
         run: |
-          uv export --locked --no-dev --format requirements-txt > /tmp/careerreach-requirements.txt
+          uv export --locked --no-dev --no-emit-project --format requirements-txt > /tmp/careerreach-requirements.txt
           uvx pip-audit --strict -r /tmp/careerreach-requirements.txt
       - name: Audit locked frontend dependencies
         working-directory: apps/web
